@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Title</title>
+    <meta charset="utf-8">
+    <style>
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Stories from the trenches: A/B-testing
+
+---
+
+# Agenda
+
+1. The System
+2. The Problem
+3. The 1st trial (and error)
+4. The 2nd trial, with less error
+5. The solution
+6. Learnings
+
+
+---
+
+# The System
+* All development on master
+* Dev runs latest build
+* QA gets manual upgrade with latest version
+* Production gets build, which have been promoted.
+* All configuration in chef
+
+Usual architecture:
+ELB - Apache - Tomcat - {lots of integrations}
+
+---
+
+## Pros:
+* Rolling update, no downtime
+* (Almost) Immutable servers
+* Auto-scaling using AMI-images of the working service.
+* Allows for _fast_ rollback
+
+Achieved through switching between auto-scaling groups on the load balancer (ELB).
+
+## Cons:
+* Built on custom code. Learning curve is quite steep
+
+---
+
+# The problem
+Test between two variants of the service.
+
+Developing the variant by feature toggles or keeping both the versions in the code is bound to lead to messy code
+* New development on a separate feature branch
+* All the changes are "final", and old functionality can be deleted
+* In case we don't want the new functionality, it can be discarded
+  * Probably cheaper than to maintain two versions
+  * Fewer moving parts and the code is production ready without major cleanup
+
+Build both versions separately and deploy them somewhere.
+
+---
+
+# The 1st trial (and error)
+! We have two auto-scaling groups, keep both and have the new version in one and the old in the other !
+
+ELB round-robin between the groups, and session affinity to always keep the user on the same variant.
+
+Always gives 1/2 and 1/2 between the versions. No way to control this ratio.
+
+Experience has show that session affinity might break in spectacular fashion on upgrade.
+
+But, the biggest drawback => **The System** gets broken
+* No clear upgrade paths
+* Downgrade is harder
+* Introduces manual steps to an otherwise automated process
+
+---
+
+# The 2nd trial, with less error
+Build nodes with both variants, LB between variant on node-to-node-basis
+* Requires deterministic selection of variant
+* Wish: Allow selecting the ratio between the traffic to the variants
+
+Nginx to the rescue: http://nginx.org/en/docs/http/ngx_http_split_clients_module.html
+
+Take _some variable_, and hash it to 32-bit integer to select version
+
+---
+## Config
+```nginx
+http {
+  upstream web-production {
+     server localhost:8080 fail_timeout=0;
+  }
+
+  upstream web-beta {
+     server localhost:18080 fail_timeout=0;
+  }
+
+  perl_set $nginx_req_rand 'sub { return int(rand(10000000)); }';
+
+  map $cookie_a_b_rand $a_b_rand {
+     default $cookie_a_b_rand;
+     ''      $nginx_req_rand;
+  }
+
+  split_clients "${a_b_rand}" $variant {
+     1.5%               "web-beta";
+     *                  "web-production";
+  }
+  server {
+    location / {
+      add_header Set-Cookie a_b_rand=$a_b_rand;
+      proxy_pass http://${variant};
+    }
+  }
+}
+```
+
+---
+# The solution
+```nginx
+http {
+  perl_set $nginx_req_rand 'sub { return int(rand(10000000)); }';
+
+  map $cookie_a_b_rand $a_b_rand {
+    default $cookie_a_b_rand;
+    ''      $nginx_req_rand;
+  }
+
+  split_clients "${a_b_rand}" $variant_no_override {
+    0.01%              "web-beta";
+    *                  "web-production";
+  }
+  server {
+    # Repeated blocks for production/beta/delete cookie
+    location = /cookie/variant/production {
+      add_header Set-Cookie 'a_b_rand=production; Path=/';
+      return 302 https://$host/;
+    }
+
+    location / {
+      add_header Set-Cookie a_b_rand=$a_b_rand;
+      proxy_pass http://${variant};
+    }
+  }
+}
+```
+
+---
+# The learnings
+* Choose wisely what basis for the A/B-selection you use
+
+* Keeping two variants of the code and libs in one place can be risky
+
+* This approach requires some quite mature config and infrastructure
+  * https://github.com/danmaz74/ABalytics
+  * https://github.com/aptonic/ab.js/tree/master
+  
+
+
+1. Using e.g. the IP will lead to all people in some NATed network to end up in the same variant. We had that problem
+at the customer, so it was a no-go for us. OTOH, using a session id will not really work, until you actually have one. Had we used JSessionid, as assigned by tomcat,
+in our case, we would always ended on the same variant, as hash(empty) is constant.</sup></sup>
+
+2. The variant from the branch must be renamed, or we can't guarantee that we're pulling in the correct version of the packages.
+These can lead to hard-to-track bugs in the running system. Probably production, unless there's a lot of testing.
+
+
+
+    </textarea>
+    <script src="https://gnab.github.io/remark/downloads/remark-latest.min.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
