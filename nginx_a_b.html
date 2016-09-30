@@ -140,14 +140,25 @@ http {
   perl_set $nginx_req_rand 'sub { return int(rand(10000000)); }';
 
   map $cookie_a_b_rand $a_b_rand {
-    default $cookie_a_b_rand;
-    ''      $nginx_req_rand;
+     default $cookie_a_b_rand;
+     ''      $nginx_req_rand;
   }
 
   split_clients "${a_b_rand}" $variant_no_override {
-    0.01%              "web-beta";
-    *                  "web-production";
+     0.01%              "web-beta";
+     *                  "web-production";
   }
+
+  # Allow override for the variant based on the cookie
+  map $cookie_a_b_rand $variant {
+     default        $variant_no_override;
+     'production'   'web-production';
+     'beta'         'web-beta';
+  }
+```
+Cont'd
+---
+```nginx
   server {
     # Repeated blocks for production/beta/delete cookie
     location = /cookie/variant/production {
@@ -165,23 +176,22 @@ http {
 
 ---
 # The learnings
+* Changing from Apache to nginx on a mission critical system is not trivial :)
+  * The details will come after you (A/B part: 4h, the rest 48h)
+
 * Choose wisely what basis for the A/B-selection you use
+  * IP-based split can skew the testing
+  * Session-id is not present on the very first page-visit
+  * Probabilities make testing difficult
 
 * Keeping two variants of the code and libs in one place can be risky
+  * Name with latest version can lead to mixed libs
 
-* This approach requires some quite mature config and infrastructure
-  * https://github.com/danmaz74/ABalytics
-  * https://github.com/aptonic/ab.js/tree/master
-  
+* The shown approach requires some quite mature config and infrastructure
+    * Paid services, like https://www.optimizely.com/
+    * "Home-grown" https://github.com/aptonic/ab.js/tree/master
 
-
-1. Using e.g. the IP will lead to all people in some NATed network to end up in the same variant. We had that problem
-at the customer, so it was a no-go for us. OTOH, using a session id will not really work, until you actually have one. Had we used JSessionid, as assigned by tomcat,
-in our case, we would always ended on the same variant, as hash(empty) is constant.</sup></sup>
-
-2. The variant from the branch must be renamed, or we can't guarantee that we're pulling in the correct version of the packages.
-These can lead to hard-to-track bugs in the running system. Probably production, unless there's a lot of testing.
-
+* This approach allows doing larger scale refactoring, e.g. tomcat -> node.js
 
 
     </textarea>
