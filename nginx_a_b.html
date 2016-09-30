@@ -65,25 +65,40 @@ Achieved through switching between auto-scaling groups on the load balancer (ELB
 # The problem
 Test between two variants of the service.
 
-Developing the variant by feature toggles or keeping both the versions in the code is bound to lead to messy code
+Alternatives:
+1. Feature switches/toggles
+1. Url-parameter, parsed on the service
+1. Separate versions on current infrastructure
+1. Separate versions, with separate infrastructure
+
+---
+# The problem
+Test between two variants of the service.
+
+Alternatives:
+1. ~~Feature switches/toggles~~
+1. ~~Url-parameter, parsed on the service~~
+1. Separate versions on current infrastructure
+1. ~~Separate versions, with separate infrastructure~~
+
+Build both versions separately and deploy them somewhere.
 * New development on a separate feature branch
 * All the changes are "final", and old functionality can be deleted
 * In case we don't want the new functionality, it can be discarded
   * Probably cheaper than to maintain two versions
   * Fewer moving parts and the code is production ready without major cleanup
-
-Build both versions separately and deploy them somewhere.
+* We were already _one step too far_
 
 ---
 
 # The 1st trial (and error)
-! We have two auto-scaling groups, keep both and have the new version in one and the old in the other !
+We have two auto-scaling groups, keep both and have the new version in one and the old in the other
 
 ELB round-robin between the groups, and session affinity to always keep the user on the same variant.
 
 Always gives 1/2 and 1/2 between the versions. No way to control this ratio.
 
-Experience has show that session affinity might break in spectacular fashion on upgrade.
+Experience has show that session affinity might break in spectacular fashion
 
 But, the biggest drawback => **The System** gets broken
 * No clear upgrade paths
@@ -92,7 +107,7 @@ But, the biggest drawback => **The System** gets broken
 
 ---
 
-# The 2nd trial, with less error
+# The 2nd trial. Less error
 Build nodes with both variants, LB between variant on node-to-node-basis
 * Requires deterministic selection of variant
 * Wish: Allow selecting the ratio between the traffic to the variants
